@@ -3,6 +3,8 @@ AbletonPush1 {
 	var <padMode, padColorCache, <padScale, <rowInterval;
 	var <>noteOnFunc, <>noteOffFunc, <>afterTouchFunc, <>ribbonFunc;
 	var xOffset, yOffset, <>noteVelocities;
+	var <encoderObjects, <encoderKeys, <encoderPage;
+	var <>displayCache;
 
 	*new {
 		^super.new.init()
@@ -13,13 +15,17 @@ AbletonPush1 {
 		midiIn = MIDIIn.findPort("Ableton Push", "User Port");
 
 		(44..47).do{|i| midiOut.control(0, i, 4) }; // turn on navigation arrows
-		[50,51,54,55].do{|i| midiOut.control(0, i, 4) }; // turn on octave up / down, note/session
+		[50,51,54,55, 62,63].do{|i| midiOut.control(0, i, 4) }; // turn on octave up / down, note/session
 		midiOut.sysex(Int8Array[240,71,127,21,92,0,1,0,247]); // set note aftertouch
 		midiOut.sysex(Int8Array[240,71,127,21,99,0,1,9 /*0-10*/ ,247]); // set ribbon to modwheel
 
 		xOffset = 0; yOffset = 0;
 		padColorCache = (0!3)!64;
 		noteVelocities = 0!128;
+
+		encoderPage = 0;
+		encoderObjects = List.newClear(32); encoderKeys = List.newClear(32);
+		displayCache = String.newClear(68)!4;
 
 		this.padMode = \note;
 		this.makeMidiFuncs;
@@ -31,10 +37,10 @@ AbletonPush1 {
 		MIDIdef.cc(\nav, {|val, cc|
 			if(val ==127) {
 				switch(cc,
-					44, {xOffset = xOffset+1},
-					45, {xOffset = xOffset-1},
-					46, {yOffset = yOffset-1},
-					47, {yOffset = yOffset+1},
+					44, {xOffset = xOffset-1},
+					45, {xOffset = xOffset+1},
+					46, {yOffset = yOffset+1},
+					47, {yOffset = yOffset-1},
 					54, {
 						yOffset = yOffset-2;
 						xOffset = xOffset-2;
@@ -44,9 +50,12 @@ AbletonPush1 {
 						xOffset = xOffset+2;
 					},
 					50, { this.padMode_(\note) },
-					51, { this.padMode_(\session) }
+					51, { this.padMode_(\session) },
+					62, { encoderPage = encoderPage + 1 },
+					63, { encoderPage = encoderPage - 1 },
 				);
 				this.updatePads;
+				// this.updateDisplay;
 			};
 		}).permanent_(true);
 
@@ -61,6 +70,7 @@ AbletonPush1 {
 				noteOnFunc !? { noteOnFunc.(vel, note, padScale.degreeToFreq(note, 0.midicps, 0)) };
 			});
 		}, (36..99),0).permanent_(true);
+
 		MIDIdef.noteOff(\padOff, {|vel, note|
 			var x,y;
 			note = note - 36;
@@ -88,6 +98,28 @@ AbletonPush1 {
 		MIDIdef.cc(\ribbon, {|val|
 			ribbonFunc !? { ribbonFunc.(val.linlin(0, 127,0, 1.0)) }
 		}, 1,0).permanent_(true);
+
+		MIDIdef.cc(\encoders, {|val, num|
+			var obj, spec, key, nodeVal, res;
+			var abs, delta, sign;
+			num = num-71;
+			val = if(val > 64, { val-128 }, { val });
+			if(val!=0, {
+				key = encoderKeys[num+(encoderPage*8)];
+				obj = encoderObjects[num+(encoderPage*8)];
+				[key, obj].postln;
+				if(obj.notNil and: { key.notNil }, {
+					spec = obj.specs[key].asSpec;
+					nodeVal = obj.get(key);
+					sign = val.sign; abs = val.abs;
+					delta = abs.linlin(1,7, 0.001, 0.1) * sign;
+					res = spec.map(spec.unmap(nodeVal) + delta);
+					obj.set(key, res);
+					this.updateDisplayValue(num, res);
+				});
+			});
+		}, (71..78)).permanent_(true);
+
 	}
 
 	// pads
@@ -147,9 +179,12 @@ AbletonPush1 {
 	// display / encoders
 	writeString {|row, block, string|
 		var offset = #[0,9,17,26,34,43,51,60][block];
-		midiOut.sysex(
-			Int8Array.newFrom([240,71,127,21,24+row,0,string.size+1,offset,string.ascii,247].flatten)
-		);
+		if(displayCache[row][offset..(offset+string.size)] != string, {
+			midiOut.sysex(
+				Int8Array.newFrom([240,71,127,21,24+row,0,string.size+1,offset,string.ascii,247].flatten)
+			);
+			displayCache[row][offset..(offset+string.size)] = string;
+		});
 	}
 	clearLine { |line|
 		midiOut.sysex(Int8Array[240,71,127,21,28+line,0,0,247]);
@@ -157,4 +192,34 @@ AbletonPush1 {
 	clearDisplay{
 		4.do{ |l| this.clearLine(l) }
 	}
+
+	updateDisplay {
+		var keys = encoderKeys[(encoderPage*8)..((encoderPage*8)+8)];
+		var objects = encoderObjects[(encoderPage*8)..((encoderPage*8)+8)];
+
+		objects.do {|obj, i|
+			var key = keys[i];
+			if(obj.notNil && key.notNil, {
+				this.writeString(0, i, obj.key.asString[0..7]);
+				this.writeString(1, i, key.asString[0..7]);
+				this.writeString(2, i, obj.get(key).asString[0..7])
+			}, {
+				this.writeString(0, i, "        ");
+				this.writeString(1, i, "        ");
+				this.writeString(2, i, "        ")
+			}
+			);
+		}
+	}
+
+	updateDisplayValue{ |slot, value|
+		this.writeString(2, slot%8, value.asString[0..7])
+	}
+
+	addControlObj {|slot, obj, key|
+		encoderObjects[slot] = obj;
+		encoderKeys[slot] = key;
+		this.updateDisplay;
+	}
+
 }
