@@ -102,20 +102,18 @@ AbletonPush1 {
 
 		MIDIdef.cc(\encoders, {|val, num|
 			var obj, spec, key, nodeVal, res;
-			var abs, delta, sign;
+			var delta, unmapped;
 			num = num-71;
 			val = if(val > 64, { val-128 }, { val });
 			if(val!=0, {
 				key = encoderKeys[num+(encoderPage*8)];
 				obj = encoderObjects[num+(encoderPage*8)];
-				[key, obj].postln;
 				if(obj.notNil and: { key.notNil }, {
 					spec = obj.specs[key].asSpec;
 					nodeVal = obj.get(key);
-					sign = val.sign; abs = val.abs;
-					// delta = abs.linlin(1,7, 0.001, 0.1) * sign;
 					delta = val * 0.001;
-					res = spec.map(spec.unmap(nodeVal) + delta);
+					unmapped = spec.unmap(nodeVal);
+					res = spec.map(unmapped + delta);
 					obj.set(key, res);
 					this.updateDisplayValue(num, res.asArray[0]);
 				});
@@ -127,12 +125,13 @@ AbletonPush1 {
 			if(val!=0, {
 				server.volume.volume = (server.volume.volume + val.linlin(-10,10.0, -2, 2.0));
 			});
-		}, 79, 0);
+		}, 79, 0).permanent_(true);
 
 		Tdef(\updateDisplay, {
 			{ this.updateDisplay; 0.5.wait }.loop
 		}).play;
 
+		CmdPeriod.add({ Tdef(\updateDisplay).play });
 	}
 
 	// pads
@@ -227,12 +226,14 @@ AbletonPush1 {
 	updateDisplay {
 		var keys = encoderKeys[(encoderPage*8)..((encoderPage*8)+7)];
 		var objects = encoderObjects[(encoderPage*8)..((encoderPage*8)+7)];
+		var value;
 		objects.do {|obj, i|
 			var key = keys[i];
+			value = obj.get(key).asArray[0];
 			if(obj.notNil and:{ key.notNil }, {
-				this.writeString(0, i, obj.key.asString[0..7]);
-				this.writeString(1, i, key.asString[0..7]);
-				this.writeString(2, i, obj.get(key).asArray[0].asString[0..7])
+				this.writeString(0, i, obj.key.asString[0..7].padRight(8));
+				this.writeString(1, i, key.asString.padRight(8)[0..7]);
+				value !? { this.writeString(2, i, value.asFloat.asStringPrec(8).padRight(8)) }
 			}, { (0..2).do{|rw| this.clearBlock(rw, i)} });
 		}
 	}
@@ -248,5 +249,7 @@ AbletonPush1 {
 		encoderValues[slot] = obj.get(key).asArray[0];
 		this.updateDisplay;
 	}
+
+	addObject{|slot, obj, keys| keys.do { |key, i| this.addControlObj(slot+i, obj, key) } }
 
 }
