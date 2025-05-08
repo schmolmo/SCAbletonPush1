@@ -1,13 +1,13 @@
 AbletonPush1 {
-	var midiOut, midiIn;
+	var <>server, midiOut, midiIn;
 	var <padMode, padColorCache, <padScale, <rowInterval;
 	var <>noteOnFunc, <>noteOffFunc, <>afterTouchFunc, <>ribbonFunc;
 	var xOffset, yOffset, <>noteVelocities;
-	var <encoderObjects, <encoderKeys, <encoderPage;
+	var <encoderObjects, <encoderKeys, <encoderPage, <encoderValues;
 	var <>displayCache;
 
-	*new {
-		^super.new.init()
+	*new {|server|
+		^super.newCopyArgs(server).init()
 	}
 	init {
 		MIDIClient.init(); MIDIIn.connectAll;
@@ -25,6 +25,7 @@ AbletonPush1 {
 
 		encoderPage = 0;
 		encoderObjects = List.newClear(32); encoderKeys = List.newClear(32);
+		encoderValues = List.newClear(32);
 		displayCache = 32!68!4; // 32=Char.space.ascii
 
 		this.padMode = \note;
@@ -112,13 +113,25 @@ AbletonPush1 {
 					spec = obj.specs[key].asSpec;
 					nodeVal = obj.get(key);
 					sign = val.sign; abs = val.abs;
-					delta = abs.linlin(1,7, 0.001, 0.1) * sign;
+					// delta = abs.linlin(1,7, 0.001, 0.1) * sign;
+					delta = val * 0.001;
 					res = spec.map(spec.unmap(nodeVal) + delta);
 					obj.set(key, res);
-					this.updateDisplayValue(num, res);
+					this.updateDisplayValue(num, res.asArray[0]);
 				});
 			});
 		}, (71..78)).permanent_(true);
+
+		MIDIdef.cc(\volume, {|val|
+			val = if(val > 64, { val-127 }, { val });
+			if(val!=0, {
+				server.volume.volume = (server.volume.volume + val.linlin(-10,10.0, -2, 2.0));
+			});
+		}, 79, 0);
+
+		Tdef(\updateDisplay, {
+			{ this.updateDisplay; 0.5.wait }.loop
+		}).play;
 
 	}
 
@@ -190,13 +203,12 @@ AbletonPush1 {
 			});
 		}
 
-
 		//update whole string
 		/*if(displayCache[row][offset..(offset+string.size-1)] != ascii, {
-			midiOut.sysex(
-				Int8Array.newFrom([240,71,127,21,24+row,0,ascii.size+1,offset,ascii,247].flatten)
-			);
-			ascii.do{|char, indx| displayCache[row][indx+offset] = char };
+		midiOut.sysex(
+		Int8Array.newFrom([240,71,127,21,24+row,0,ascii.size+1,offset,ascii,247].flatten)
+		);
+		ascii.do{|char, indx| displayCache[row][indx+offset] = char };
 		});*/
 
 	}
@@ -211,20 +223,21 @@ AbletonPush1 {
 		this.writeString(row, block, "        ")
 	}
 
+	// this takes the displayed value from the object via obj.get
 	updateDisplay {
 		var keys = encoderKeys[(encoderPage*8)..((encoderPage*8)+7)];
 		var objects = encoderObjects[(encoderPage*8)..((encoderPage*8)+7)];
-		objects.size.postln;
 		objects.do {|obj, i|
 			var key = keys[i];
 			if(obj.notNil and:{ key.notNil }, {
 				this.writeString(0, i, obj.key.asString[0..7]);
 				this.writeString(1, i, key.asString[0..7]);
-				this.writeString(2, i, obj.get(key).asString[0..7])
+				this.writeString(2, i, obj.get(key).asArray[0].asString[0..7])
 			}, { (0..2).do{|rw| this.clearBlock(rw, i)} });
 		}
 	}
 
+	// this updates the given value
 	updateDisplayValue{ |slot, value|
 		this.writeString(2, slot%8, value.asString[0..7])
 	}
@@ -232,6 +245,7 @@ AbletonPush1 {
 	addControlObj {|slot, obj, key|
 		encoderObjects[slot] = obj;
 		encoderKeys[slot] = key;
+		encoderValues[slot] = obj.get(key).asArray[0];
 		this.updateDisplay;
 	}
 
