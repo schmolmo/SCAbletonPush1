@@ -25,7 +25,7 @@ AbletonPush1 {
 
 		encoderPage = 0;
 		encoderObjects = List.newClear(32); encoderKeys = List.newClear(32);
-		displayCache = String.newClear(68)!4;
+		displayCache = 32!68!4; // 32=Char.space.ascii
 
 		this.padMode = \note;
 		this.makeMidiFuncs;
@@ -179,12 +179,26 @@ AbletonPush1 {
 	// display / encoders
 	writeString {|row, block, string|
 		var offset = #[0,9,17,26,34,43,51,60][block];
-		if(displayCache[row][offset..(offset+string.size)] != string, {
+		var ascii = string.ascii;
+
+		// update single chars
+		ascii.do{|char, indx|
+			indx = indx+offset;
+			if(displayCache[row][indx]!=char, {
+				midiOut.sysex(Int8Array.newFrom([240,71,127,21,24+row,0,1+1,indx,char,247]));
+				displayCache[row][indx] = char;
+			});
+		}
+
+
+		//update whole string
+		/*if(displayCache[row][offset..(offset+string.size-1)] != ascii, {
 			midiOut.sysex(
-				Int8Array.newFrom([240,71,127,21,24+row,0,string.size+1,offset,string.ascii,247].flatten)
+				Int8Array.newFrom([240,71,127,21,24+row,0,ascii.size+1,offset,ascii,247].flatten)
 			);
-			displayCache[row][offset..(offset+string.size)] = string;
-		});
+			ascii.do{|char, indx| displayCache[row][indx+offset] = char };
+		});*/
+
 	}
 	clearLine { |line|
 		midiOut.sysex(Int8Array[240,71,127,21,28+line,0,0,247]);
@@ -193,22 +207,21 @@ AbletonPush1 {
 		4.do{ |l| this.clearLine(l) }
 	}
 
-	updateDisplay {
-		var keys = encoderKeys[(encoderPage*8)..((encoderPage*8)+8)];
-		var objects = encoderObjects[(encoderPage*8)..((encoderPage*8)+8)];
+	clearBlock{ |row, block|
+		this.writeString(row, block, "        ")
+	}
 
+	updateDisplay {
+		var keys = encoderKeys[(encoderPage*8)..((encoderPage*8)+7)];
+		var objects = encoderObjects[(encoderPage*8)..((encoderPage*8)+7)];
+		objects.size.postln;
 		objects.do {|obj, i|
 			var key = keys[i];
-			if(obj.notNil && key.notNil, {
+			if(obj.notNil and:{ key.notNil }, {
 				this.writeString(0, i, obj.key.asString[0..7]);
 				this.writeString(1, i, key.asString[0..7]);
 				this.writeString(2, i, obj.get(key).asString[0..7])
-			}, {
-				this.writeString(0, i, "        ");
-				this.writeString(1, i, "        ");
-				this.writeString(2, i, "        ")
-			}
-			);
+			}, { (0..2).do{|rw| this.clearBlock(rw, i)} });
 		}
 	}
 
