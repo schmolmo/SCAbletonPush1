@@ -1,14 +1,29 @@
 AbletonPush1 {
-	var <>server, midiOut, midiIn;
+	var <>server, <midiOut, midiIn;
 	var <padMode, padColorCache, <padScale, <rowInterval;
 	var <>noteOnFunc, <>noteOffFunc, <>afterTouchFunc, <>ribbonFunc;
 	var xOffset, yOffset, <>noteVelocities;
-	var <encoderObjects, <encoderKeys, <encoderPage, <encoderValues;
+	var <encoderObjects, <encoderKeys, <>encoderPage, <encoderValues;
 	var <>displayCache;
 
 	*new {|server|
 		^super.newCopyArgs(server).init()
 	}
+
+	*getProgressBar {|value| // between 0-1.0
+		var steps = (value.clip(0, 1) * 32).trunc.asInteger;
+		^Array.fill(8, { |i|
+			var local = (steps - (i * 4)).clip(0, 4);
+			switch(local,
+				0, { 6 }, // --
+				1, { 4 }, // -|
+				2, { 3 }, // |-
+				3, { 5 }, // ||
+				4, { 5 }  // ||
+			)
+		})
+	}
+
 	init {
 		MIDIClient.init(); MIDIIn.connectAll;
 		midiOut = MIDIOut.newByName("Ableton Push", "User Port");
@@ -24,8 +39,8 @@ AbletonPush1 {
 		noteVelocities = 0!128;
 
 		encoderPage = 0;
-		encoderObjects = List.newClear(32); encoderKeys = List.newClear(32);
-		encoderValues = List.newClear(32);
+		encoderObjects = List.newClear(64); encoderKeys = List.newClear(64);
+		encoderValues = List.newClear(64);
 		displayCache = 32!68!4; // 32=Char.space.ascii
 
 		this.padMode = \note;
@@ -111,11 +126,11 @@ AbletonPush1 {
 				if(obj.notNil and: { key.notNil }, {
 					spec = obj.specs[key].asSpec;
 					nodeVal = obj.get(key);
-					delta = val * 0.001;
+					delta = val * 0.01;
 					unmapped = spec.unmap(nodeVal);
 					res = spec.map(unmapped + delta);
 					obj.set(key, res);
-					this.updateDisplayValue(num, res.asArray[0]);
+					this.updateDisplayValue(num, res.asArray[0], spec);
 				});
 			});
 		}, (71..78)).permanent_(true);
@@ -211,6 +226,14 @@ AbletonPush1 {
 		});*/
 
 	}
+
+	writeAscii {|row, block, ascii|
+		var offset = #[0,9,17,26,34,43,51,60][block];
+		if(displayCache[row][offset..(offset+ascii.size-1)] != ascii) {
+			midiOut.sysex( Int8Array.newFrom([240,71,127,21,24+row,0,ascii.size+1,offset,ascii,247].flatten) );
+			ascii.do{|char, indx| displayCache[row][indx+offset] = char };
+		};
+	}
 	clearLine { |line|
 		midiOut.sysex(Int8Array[240,71,127,21,28+line,0,0,247]);
 	}
@@ -233,14 +256,18 @@ AbletonPush1 {
 			if(obj.notNil and:{ key.notNil }, {
 				this.writeString(0, i, obj.key.asString[0..7].padRight(8));
 				this.writeString(1, i, key.asString.padRight(8)[0..7]);
-				value !? { this.writeString(2, i, value.asFloat.asStringPrec(8).padRight(8)) }
-			}, { (0..2).do{|rw| this.clearBlock(rw, i)} });
+				value !? {
+					this.writeAscii(2, i, AbletonPush1.getProgressBar(obj.specs[key].unmap(value)));
+					this.writeString(3, i, value.asFloat.asStringPrec(8).padRight(8))
+				}
+			}, { (0..3).do{|rw| this.clearBlock(rw, i)} });
 		}
 	}
 
 	// this updates the given value
-	updateDisplayValue{ |slot, value|
-		this.writeString(2, slot%8, value.asString[0..7])
+	updateDisplayValue{ |slot, value, spec|
+		this.writeAscii(2, slot%8, AbletonPush1.getProgressBar(spec.unmap(value)));
+		this.writeString(3, slot%8, value.asStringPrec(5))
 	}
 
 	addControlObj {|slot, obj, key|
