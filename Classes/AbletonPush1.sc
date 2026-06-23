@@ -26,8 +26,18 @@ AbletonPush1 {
 
 	init {
 		MIDIClient.init(); MIDIIn.connectAll;
-		midiOut = MIDIOut.newByName("Ableton Push", "User Port");
-		midiIn = MIDIIn.findPort("Ableton Push", "User Port");
+		switch(thisProcess.platform.name)
+		{\osx} {
+			"mac os".postln;
+			midiOut = MIDIOut.newByName("Ableton Push", "User Port");
+			midiIn = MIDIIn.findPort("Ableton Push", "User Port");
+		}
+		{\linux } {
+			"linux".postln;
+			midiOut = MIDIOut.findPort("Ableton Push", "Ableton Push User Port");
+			midiOut.latency_(0);
+			midiIn = MIDIIn.findPort("Ableton Push", "Ableton Push User Port");
+		};
 
 		(44..47).do{|i| midiOut.control(0, i, 4) }; // turn on navigation arrows
 		[50,51,54,55, 62,63].do{|i| midiOut.control(0, i, 4) }; // turn on octave up / down, note/session
