@@ -1,7 +1,7 @@
 AbletonPush1 {
 	var <>server, <simulation, <midiOut, midiIn;
 	var <padMode, padColorCache, <padScale, <rowInterval;
-	var <>noteOnFunc, <>noteOffFunc, <>afterTouchFunc, <>ribbonFunc;
+	var <>noteOnFunc, <>noteOffFunc, <>afterTouchFunc, <>ribbonFunc, <>pedal1Func;
 	var xOffset, yOffset, <>noteVelocities;
 	var <encoderObjects, <encoderKeys, <>encoderPage, <encoderValues;
 	var <>displayCache;
@@ -162,6 +162,8 @@ AbletonPush1 {
 		Tdef(\updateDisplay, {
 			{ this.updateDisplay; 0.5.wait }.loop
 		}).play;
+
+		MIDIdef.cc(\pedal1, {|val| pedal1Func.value(val) },69,0);
 
 		CmdPeriod.add({ Tdef(\updateDisplay).play });
 	}
