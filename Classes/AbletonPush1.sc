@@ -1,13 +1,14 @@
 AbletonPush1 {
-	var <>server, <midiOut, midiIn;
+	var <>server, <simulation, <midiOut, midiIn;
 	var <padMode, padColorCache, <padScale, <rowInterval;
 	var <>noteOnFunc, <>noteOffFunc, <>afterTouchFunc, <>ribbonFunc;
 	var xOffset, yOffset, <>noteVelocities;
 	var <encoderObjects, <encoderKeys, <>encoderPage, <encoderValues;
 	var <>displayCache;
+	var <>highlightPads;
 
-	*new {|server|
-		^super.newCopyArgs(server).init()
+	*new {|server, simulation=false|
+		^super.newCopyArgs(server, simulation).init()
 	}
 
 	*getProgressBar {|value| // between 0-1.0
@@ -29,8 +30,13 @@ AbletonPush1 {
 		switch(thisProcess.platform.name)
 		{\osx} {
 			"mac os".postln;
-			midiOut = MIDIOut.newByName("Ableton Push", "User Port");
-			midiIn = MIDIIn.findPort("Ableton Push", "User Port");
+			if(simulation.not, {
+				midiOut = MIDIOut.newByName("Ableton Push", "User Port");
+				midiIn = MIDIIn.findPort("Ableton Push", "User Port");
+			}, {
+				midiOut = MIDIOut.newByName("Internal MIDI", "to DAW");
+				midiIn = MIDIIn.findPort("Internal MIDI", "to DAW");
+			});
 		}
 		{\linux } {
 			"linux".postln;
@@ -46,6 +52,7 @@ AbletonPush1 {
 
 		xOffset = 0; yOffset = 0;
 		padColorCache = (0!3)!64;
+		highlightPads = List[];
 		noteVelocities = 0!128;
 
 		encoderPage = 0;
@@ -178,8 +185,9 @@ AbletonPush1 {
 						var note, thisColor;
 						padNum = (y*8) + x;
 						note = (x + xOffset) + ((y+yOffset)*rowInterval);
-						thisColor = if(note % padScale.degrees.size == 0,
-							{[0, 0, 127] }, { 127!3 });
+						thisColor = if(highlightPads.includes(note), { [0,64, 127] }, {
+							if(note % padScale.degrees.size == 0,{[0, 0, 127] }, { 127!3 })
+						});
 						this.setPadColor(padNum.clip(0,63), *thisColor);
 					};
 				}
