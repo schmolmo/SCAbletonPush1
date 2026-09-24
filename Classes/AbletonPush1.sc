@@ -1,11 +1,11 @@
 AbletonPush1 {
-	var <>server, <midiOut, midiIn;
+	var <midiOut, midiIn;
 	var displayCache, padColorCache;
 	var <buttonFuncs, <>padOnFunc, <>padOffFunc, <>padVelFunc, <>displayFunc, <>encoderFunc, <>ribbonFunc;
 	var <>pedal1Func;
 
-	*new {|server|
-		^super.newCopyArgs(server).init()
+	*new {
+		^super.newCopyArgs().init()
 	}
 
 	*getProgressBar {|value| // between 0-1.0
@@ -192,5 +192,8 @@ AbletonPush1 {
 
 	clearBlock{ |row, block| this.writeAscii(row, block, 32!8) }
 
-
+	registerButton {|key, func, ledmode=\on|
+		buttonFuncs[key] = func;
+		midiOut.control(0, AbletonPush1.buttonCodes[key], 4)
+	}
 }
