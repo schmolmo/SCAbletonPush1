@@ -1,6 +1,6 @@
 AbletonPush1 {
 	var <midiOut, midiIn;
-	var displayCache, padColorCache;
+	var displayCache, padColorCache, <>displayMode;
 	var <buttonFuncs, <>padOnFunc, <>padOffFunc, <>padVelFunc, <>displayFunc, <>encoderFunc, <>ribbonFunc;
 	var <>pedal1Func;
 
@@ -91,6 +91,7 @@ AbletonPush1 {
 		padVelFunc = {};
 		ribbonFunc = {};
 		pedal1Func = {};
+		displayMode = \blocks; // blocks / continous
 
 		this.makeMidiFuncs;
 		this.clearDisplay;
