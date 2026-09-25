@@ -1,7 +1,7 @@
 AbletonPush1 {
 	var <midiOut, midiIn;
 	var displayCache, padColorCache, <>displayMode;
-	var <buttonFuncs, <>padOnFunc, <>padOffFunc, <>padVelFunc, <>displayFunc, <>encoderFunc, <>ribbonFunc;
+	var buttonUpFuncs, buttonDownFuncs, <>padOnFunc, <>padOffFunc, <>padVelFunc, <displayFunc, <dispJack, <>encoderFunc, <>ribbonFunc;
 	var <>pedal1Func;
 
 	*new {
@@ -72,7 +72,10 @@ AbletonPush1 {
 	}
 
 	*buttonKeys { ^this.buttonCodes.keys }
+
 	*buttonCCs { ^this.buttonCodes.values }
+
+	*pushConnected { MIDIIn.connectAll; ^MIDIIn.findPort("Ableton Push", "User Port").notNil }
 
 
 	init {
@@ -82,9 +85,10 @@ AbletonPush1 {
 
 		padColorCache = (0!3)!64;
 
-		displayCache = 32!68!4; // 32=Char.space.ascii
-		buttonFuncs = IdentityDictionary[];
-		displayFunc = {};
+		displayCache = 0!68!4; // 32=Char.space.ascii
+		buttonUpFuncs = IdentityDictionary[];
+		buttonDownFuncs = IdentityDictionary[];
+		displayFunc = { this.toBlocks([]) };
 		encoderFunc = {};
 		padOnFunc = {};
 		padOffFunc = {};
@@ -94,12 +98,11 @@ AbletonPush1 {
 		displayMode = \blocks; // blocks / continous
 
 		this.makeMidiFuncs;
-		this.clearDisplay;
-
+		dispJack = Task({ loop { this.setDisplayRows(displayFunc.()); 0.2.wait } }).play
 	}
 
 	initMidiPort {
-				MIDIClient.init(); MIDIIn.connectAll;
+		MIDIClient.init(); MIDIIn.connectAll;
 		switch(thisProcess.platform.name)
 		{\osx} {
 			"mac os".postln;
@@ -112,27 +115,20 @@ AbletonPush1 {
 			midiOut.latency_(0);
 			midiIn = MIDIIn.findPort("Ableton Push", "Ableton Push User Port");
 		};
-
-
 	}
 
 	makeMidiFuncs {
 
-		MIDIFunc.cc({|val, cc| buttonFuncs[AbletonPush1.buttonCodes.invert[cc]].value},
-			AbletonPush1.buttonCCs,0).permanent_(true);
-
+		MIDIFunc.cc({|val, cc|
+			var key = AbletonPush1.buttonCodes.invert[cc];
+			if(val == 127, { buttonDownFuncs[key].value }, { buttonUpFuncs[key].value });
+		}, AbletonPush1.buttonCCs,0).permanent_(true);
 		MIDIFunc.noteOn({|vel, note| padOnFunc.value(note-36, vel) }, (36..99),0).permanent_(true);
 		MIDIFunc.noteOff({|vel, note| padOffFunc.value(note-36, vel) }, (36..99),0).permanent_(true);
-		MIDIFunc.polytouch(\aftertouch, {|vel, note| padVelFunc.value(note-36, vel)}, (36..99), 0).permanent_(true);
+		MIDIFunc.polytouch({|vel, note| padVelFunc.value(note-36, vel)}, (36..99), 0).permanent_(true);
 		MIDIFunc.cc({|val| ribbonFunc !? { ribbonFunc.(val.linlin(0, 127,0, 1.0)) } }, 1,0).permanent_(true);
 		MIDIFunc.cc({|val, num| encoderFunc.value(num-71, val)}, (71..79)).permanent_(true);
-		MIDIFunc.cc({|val| pedal1Func.value(val) },69,0);
-
-		Tdef(\updateDisplay, {
-			{ this.updateDisplay; 0.5.wait }.loop
-		}).play;
-
-		CmdPeriod.add({ Tdef(\updateDisplay).play });
+		MIDIFunc.cc({|val| pedal1Func.value(val) },69,0)
 	}
 
 
@@ -153,39 +149,52 @@ AbletonPush1 {
 		64.do { |i| this.setPadColor(i, 0, 0, 0) }
 	}
 
-
-
-	// display / encoders
-	writeString {|row, block, string|
-		var offset = #[0,9,17,26,34,43,51,60][block];
-		var ascii = string.ascii;
-
-		// update single chars
-		ascii.do{|char, indx|
-			indx = indx+offset;
-			if(displayCache[row][indx]!=char, {
-				midiOut.sysex(Int8Array.newFrom([240,71,127,21,24+row,0,1+1,indx,char,247]));
-				displayCache[row][indx] = char;
-			});
-		}
-
-		//update whole string
-		/*if(displayCache[row][offset..(offset+string.size-1)] != ascii, {
-		midiOut.sysex(
-		Int8Array.newFrom([240,71,127,21,24+row,0,ascii.size+1,offset,ascii,247].flatten)
-		);
-		ascii.do{|char, indx| displayCache[row][indx+offset] = char };
-		});*/
-
-	}
-
-	writeAscii {|row, block, ascii|
-		var offset = #[0,9,17,26,34,43,51,60][block];
-		if(displayCache[row][offset..(offset+ascii.size-1)] != ascii) {
-			midiOut.sysex( Int8Array.newFrom([240,71,127,21,24+row,0,ascii.size+1,offset,ascii,247].flatten) );
-			ascii.do{|char, indx| displayCache[row][indx+offset] = char };
+	setDisplayRows  {|newRows|
+		var tailingOldChars, oldRow; // oldChars: Chars in the message that are old, so sent without need
+		var msg, msgStart;
+		var sendSysex = {|row, offset, chars|
+			midiOut.sysex(Int8Array.newFrom([240, 71, 127, 21] ++ [24 + row, 0, chars.size + 1, offset] ++ chars ++ [247]));
 		};
+
+		newRows = newRows.extend(4, []).collect(_.extend(68, 32));
+		newRows.do {|row, rowIndx|
+			oldRow = displayCache[rowIndx];
+			tailingOldChars = 0; msg=nil; msgStart =nil;
+			row.do{|newChar,i|
+				if(msg.notNil,{
+					if(oldRow[i]==newChar, { tailingOldChars = tailingOldChars+1 }, {tailingOldChars = 0 });
+					msg.add(newChar);
+				}, { if(oldRow[i]!=newChar, { msg=List[newChar]; msgStart=i }) });
+				if(tailingOldChars > 9) {
+					if(msg.size > 9) { sendSysex.(rowIndx,msgStart, msg.copy[0..(msg.size-9)]) };
+					msgStart = nil; msg = nil;
+				};
+				if(i>66 and: { msg.notNil }, { sendSysex.(rowIndx, msgStart, msg) });
+				newChar
+			}
+		};
+		displayCache = newRows
 	}
+
+	toBlocks{|rows| /// this should be a class method, but the class name is too long :--)
+		var offset = [0,9,17,26,34,43,51,60];
+		var spaces = [8,25,42,59];
+		var res;
+		var cells;
+		rows = rows.extend(4,[]).collect{|row|
+			row.collect{|block|
+				block = block.value;
+				if(block.isKindOf(String), { block.ascii }, {block})
+			}.extend(8, [])
+		};
+		cells = 4.collect{|row|
+			res = 8.collect{|coll| rows[row][coll].extend(8,32).at((0..7)) }.flatten;
+			spaces.do{|indx| res = res.insert(indx, 32)}; res
+		};
+		^cells
+	}
+
+	displayFunc_ {|newFunc| displayFunc = newFunc; dispJack.reset.play }
 
 	clearLine { |line| midiOut.sysex(Int8Array[240,71,127,21,28+line,0,0,247]) }
 
@@ -193,8 +202,17 @@ AbletonPush1 {
 
 	clearBlock{ |row, block| this.writeAscii(row, block, 32!8) }
 
-	registerButton {|key, func, ledmode=\on|
-		buttonFuncs[key] = func;
+	registerButton {|key, func, triggerWhen=\up, ledmode=\on|
+		AbletonPush1.buttonCodes[key] ?? { "no button with this name found".throw };
+		switch(triggerWhen,
+			\up, { buttonUpFuncs[key] = func },
+			\down,{ buttonDownFuncs[key] = func });
 		midiOut.control(0, AbletonPush1.buttonCodes[key], 4)
 	}
+
+	unregisterButton {|key|
+		buttonUpFuncs.removeAt(key); buttonDownFuncs.removeAt(key);
+		midiOut.control(0, AbletonPush1.buttonCodes[key], 0)
+	}
+
 }
